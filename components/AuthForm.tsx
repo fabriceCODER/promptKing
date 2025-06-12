@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { setCookie } from 'cookies-next';
 
 const authSchema = z.object({
@@ -18,13 +18,19 @@ type AuthFormData = z.infer<typeof authSchema>;
 
 export default function AuthForm({ mode = 'login' }: { mode?: 'login' | 'register' }) {
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { register, handleSubmit, formState: { errors } } = useForm<AuthFormData>({
     resolver: zodResolver(authSchema),
   });
 
   const onSubmit = async (data: AuthFormData) => {
     try {
+      setIsLoading(true);
+      setError('');
+
       const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -35,15 +41,67 @@ export default function AuthForm({ mode = 'login' }: { mode?: 'login' | 'registe
       const result = await response.json();
 
       if (!response.ok) {
+        if (result.error === 'Email not verified') {
+          setVerificationSent(true);
+          return;
+        }
         throw new Error(result.message || 'Authentication failed');
       }
 
       setCookie('token', result.token);
-      router.push('/dashboard/coders');
+      const callbackUrl = searchParams.get('callbackUrl') || '/dashboard/coders';
+      router.push(callbackUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  const handleResendVerification = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+
+      const response = await fetch('/api/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: searchParams.get('email') }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to resend verification email');
+      }
+
+      setVerificationSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend verification email');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (verificationSent) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-lg"
+      >
+        <h2 className="text-2xl font-bold mb-4 text-center">Verify Your Email</h2>
+        <p className="text-gray-600 mb-4 text-center">
+          We've sent a verification email to your address. Please check your inbox and click the verification link.
+        </p>
+        <button
+          onClick={handleResendVerification}
+          disabled={isLoading}
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+        >
+          {isLoading ? 'Sending...' : 'Resend Verification Email'}
+        </button>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -100,9 +158,10 @@ export default function AuthForm({ mode = 'login' }: { mode?: 'login' | 'registe
 
         <button
           type="submit"
-          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          disabled={isLoading}
+          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
         >
-          {mode === 'login' ? 'Login' : 'Register'}
+          {isLoading ? 'Processing...' : mode === 'login' ? 'Login' : 'Register'}
         </button>
       </form>
     </motion.div>

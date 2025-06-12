@@ -1,50 +1,60 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+
+const prisma = new PrismaClient();
+
+const registerSchema = z.object({
+  name: z.string().min(2).max(50),
+  email: z.string().email(),
+  password: z.string().min(6),
+});
 
 export async function POST(req: Request) {
   try {
-    const { email, password, name } = await req.json();
+    const body = await req.json();
+    const { name, email, password } = registerSchema.parse(body);
 
-    const response = await fetch(`${process.env.PAYLOAD_PUBLIC_SERVER_URL}/api/users`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        name,
-      }),
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email }
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.errors?.[0]?.message || 'Registration failed');
+    if (existingUser) {
+      return NextResponse.json(
+        { error: 'User already exists' },
+        { status: 400 }
+      );
     }
 
-    const data = await response.json();
-    const { token, user } = data;
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Set the JWT token in an HTTP-only cookie
-    cookies().set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
-    });
-
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
+    // Create user
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
       },
     });
+
+    // Remove password from response
+    const { password: _, ...userWithoutPassword } = user;
+
+    return NextResponse.json(userWithoutPassword);
   } catch (error) {
-    console.error('Registration error:', error);
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.errors },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Registration failed' },
-      { status: 400 }
+      { error: 'Internal server error' },
+      { status: 500 }
     );
   }
 } 

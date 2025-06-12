@@ -4,21 +4,20 @@ import { getToken } from 'next-auth/jwt';
 
 export async function middleware(request: NextRequest) {
   const token = await getToken({ req: request });
+  const isAuthPage = request.nextUrl.pathname.startsWith('/login') || 
+                    request.nextUrl.pathname.startsWith('/register');
 
-  // Check if the request is for a protected route
-  const isProtectedRoute = request.nextUrl.pathname.startsWith('/dashboard') ||
-    request.nextUrl.pathname.startsWith('/prompt/new');
+  if (isAuthPage) {
+    if (token) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
+    return NextResponse.next();
+  }
 
-  // If it's a protected route and there's no token, redirect to login
-  if (isProtectedRoute && !token) {
+  if (!token) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('callbackUrl', request.url);
     return NextResponse.redirect(loginUrl);
-  }
-
-  // If user is logged in and tries to access login/register, redirect to dashboard
-  if (token && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/register')) {
-    return NextResponse.redirect(new URL('/dashboard/coders', request.url));
   }
 
   return NextResponse.next();
@@ -27,8 +26,8 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/dashboard/:path*',
-    '/prompt/new',
+    '/prompt/:path*',
     '/login',
-    '/register',
-  ],
+    '/register'
+  ]
 }; 
